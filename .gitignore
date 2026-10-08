@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+venv/
+node_modules/
+msmeos2.db
+dist/
+.DS_Store
