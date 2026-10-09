@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import OverviewView from './components/OverviewView';
 import AnalyzeView from './components/AnalyzeView';
@@ -7,9 +7,31 @@ import ReportsView from './components/ReportsView';
 import ValidationView from './components/ValidationView';
 import BusinessModelView from './components/BusinessModelView';
 import RoadmapView from './components/RoadmapView';
+import { ConfirmDialog, Toasts } from './components/ui';
+
+const TABS = ['overview', 'documents', 'findings', 'report', 'validation', 'model', 'roadmap'];
+const TITLES = {
+  overview: 'Overview', documents: 'Documents', findings: 'Findings', report: 'Report',
+  validation: 'Pilot feedback', model: 'Business model', roadmap: 'Roadmap',
+};
+
+const tabFromHash = () => {
+  const t = window.location.hash.replace(/^#\/?/, '');
+  return TABS.includes(t) ? t : 'overview';
+};
+
+async function api(url, options) {
+  const res = await fetch(url, options);
+  if (!res.ok) {
+    let detail = '';
+    try { detail = (await res.json()).detail; } catch { /* non-JSON error body */ }
+    throw new Error(detail || `Request failed (${res.status})`);
+  }
+  return res.json();
+}
 
 export default function App() {
-  const [currentTab, setCurrentTab] = useState('overview');
+  const [currentTab, setTab] = useState(tabFromHash);
   const [dashboardData, setDashboardData] = useState(null);
   const [documents, setDocuments] = useState([]);
   const [findings, setFindings] = useState([]);
@@ -17,248 +39,233 @@ export default function App() {
   const [validationData, setValidationData] = useState(null);
   const [businessModelData, setBusinessModelData] = useState(null);
   const [roadmapData, setRoadmapData] = useState(null);
+  const [loaded, setLoaded] = useState(false);
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStep, setProcessingStep] = useState(1);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [toasts, setToasts] = useState([]);
+  const timers = useRef([]);
 
-  // Load initial application data
-  useEffect(() => {
-    refreshAllData();
+  const navigate = useCallback((tab) => {
+    window.location.hash = `/${tab}`;
   }, []);
 
-  const refreshAllData = async (targetAnalysisId = null) => {
+  useEffect(() => {
+    const onHash = () => setTab(tabFromHash());
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
+  useEffect(() => {
+    document.title = `${TITLES[currentTab]} · MSMEOS`;
+    window.scrollTo(0, 0);
+  }, [currentTab]);
+
+  const notify = useCallback((message, kind = 'info') => {
+    const id = Math.random().toString(36).slice(2);
+    setToasts((t) => [...t, { id, message, kind }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === 'error' ? 6000 : 3500);
+  }, []);
+
+  const refreshAllData = useCallback(async (targetAnalysisId = null) => {
     try {
-      const dashUrl = targetAnalysisId ? `/api/dashboard?analysis_id=${targetAnalysisId}` : '/api/dashboard';
-      const findUrl = targetAnalysisId ? `/api/findings?analysis_id=${targetAnalysisId}` : '/api/findings';
-
-      const [dashRes, docsRes, findRes, valRes, bmRes, rmRes] = await Promise.all([
-        fetch(dashUrl).then((r) => r.json()),
-        fetch('/api/documents').then((r) => r.json()),
-        fetch(findUrl).then((r) => r.json()),
-        fetch('/api/validation/feedback').then((r) => r.json()),
-        fetch('/api/business-model').then((r) => r.json()),
-        fetch('/api/roadmap').then((r) => r.json()),
+      const q = targetAnalysisId ? `?analysis_id=${targetAnalysisId}` : '';
+      const [dash, docs, finds, val, bm, rm] = await Promise.all([
+        api(`/api/dashboard${q}`),
+        api('/api/documents'),
+        api(`/api/findings${q}`),
+        api('/api/validation/feedback'),
+        api('/api/business-model'),
+        api('/api/roadmap'),
       ]);
+      setDashboardData(dash);
+      setDocuments(docs || []);
+      setFindings(finds || []);
+      setValidationData(val);
+      setBusinessModelData(bm);
+      setRoadmapData(rm);
 
-      setDashboardData(dashRes);
-      setDocuments(docsRes || []);
-      setFindings(findRes || []);
-      setValidationData(valRes);
-      setBusinessModelData(bmRes);
-      setRoadmapData(rmRes);
-
-      const activeAnalysisId = targetAnalysisId || (dashRes && dashRes.latest_analysis_id);
-      if (activeAnalysisId) {
-        fetch(`/api/analyses/${activeAnalysisId}`)
-          .then((r) => r.json())
-          .then((data) => setCurrentAnalysis(data))
-          .catch((err) => console.error("Error fetching analysis:", err));
+      const activeId = targetAnalysisId || dash?.latest_analysis_id;
+      if (activeId) {
+        api(`/api/analyses/${activeId}`).then(setCurrentAnalysis).catch(() => notify('Could not load the analysis.', 'error'));
       } else {
         setCurrentAnalysis(null);
       }
     } catch (err) {
-      console.error("Error loading application data:", err);
+      notify(`Could not reach the server. ${err.message}`, 'error');
+    } finally {
+      setLoaded(true);
     }
+  }, [notify]);
+
+  useEffect(() => { refreshAllData(); }, [refreshAllData]);
+
+  // Steps advance while the request runs and jump to done when it returns.
+  const runSteps = (stepsMs) => {
+    timers.current.forEach(clearTimeout);
+    setProcessingStep(1);
+    timers.current = stepsMs.map((ms, i) => setTimeout(() => setProcessingStep(i + 2), ms));
+  };
+  const stopSteps = () => { timers.current.forEach(clearTimeout); timers.current = []; };
+
+  const finishAnalysis = async (analysis) => {
+    stopSteps();
+    setProcessingStep(5);
+    setCurrentAnalysis(analysis);
+    await refreshAllData(analysis.id);
+    setIsProcessing(false);
+    navigate('overview');
+    notify(`Review ready for ${analysis.business_name}.`);
   };
 
   const handleRunDemo = async (option = 'agro') => {
     setIsProcessing(true);
-    setCurrentTab('analyze');
-    setProcessingStep(1);
-
-    // Multi-step progressive animation
-    setTimeout(() => setProcessingStep(2), 600);
-    setTimeout(() => setProcessingStep(3), 1200);
-    setTimeout(() => setProcessingStep(4), 1800);
-
+    navigate('documents');
+    runSteps([500, 1100, 1700]);
     try {
       const optStr = typeof option === 'string' ? option : 'agro';
-      const res = await fetch(`/api/demo/load?option=${encodeURIComponent(optStr)}`, { method: 'POST' });
-      const data = await res.json();
-      
-      setTimeout(async () => {
-        setIsProcessing(false);
-        if (data.analysis) {
-          setCurrentAnalysis(data.analysis);
-          await refreshAllData(data.analysis.id);
-        } else {
-          await refreshAllData();
-        }
-        setCurrentTab('overview');
-      }, 2300);
+      const data = await api(`/api/demo/load?option=${encodeURIComponent(optStr)}`, { method: 'POST' });
+      if (data.analysis) await finishAnalysis(data.analysis);
+      else { stopSteps(); setIsProcessing(false); await refreshAllData(); }
     } catch (err) {
-      console.error("Error running demo:", err);
+      stopSteps();
       setIsProcessing(false);
+      notify(`Could not load the sample. ${err.message}`, 'error');
     }
   };
 
   const handleResetDemo = async () => {
-    const confirmReset = window.confirm("Reset all demo documents, analyses, and findings? This will restore the clean empty state.");
-    if (!confirmReset) return;
-
+    setConfirmReset(false);
     try {
-      await fetch('/api/demo/reset', { method: 'POST' });
+      await api('/api/demo/reset', { method: 'POST' });
       await refreshAllData();
-      setCurrentTab('overview');
+      navigate('overview');
+      notify('Workspace cleared.');
     } catch (err) {
-      console.error("Error resetting demo:", err);
+      notify(`Could not reset. ${err.message}`, 'error');
     }
   };
 
   const handleUploadFile = async (file) => {
     setIsProcessing(true);
-    setProcessingStep(1);
-
-    const formData = new FormData();
-    formData.append('file', file);
-
+    runSteps([600, 1400, 2200]);
     try {
-      const uploadRes = await fetch('/api/documents/upload', {
-        method: 'POST',
-        body: formData
-      });
-      if (!uploadRes.ok) {
-        const errJson = await uploadRes.json();
-        alert(errJson.detail || "Upload error");
-        setIsProcessing(false);
-        return;
-      }
-      const uploadData = await uploadRes.json();
-
-      setProcessingStep(2);
-      setTimeout(() => setProcessingStep(3), 500);
-
-      // Trigger analysis
-      const analyzeRes = await fetch(`/api/documents/${uploadData.id}/analyze`, { method: 'POST' });
-      const analysisJson = await analyzeRes.json();
-
-      setProcessingStep(4);
-      setTimeout(async () => {
-        setIsProcessing(false);
-        setCurrentAnalysis(analysisJson);
-        await refreshAllData(analysisJson.id);
-        setCurrentTab('overview');
-      }, 800);
+      const formData = new FormData();
+      formData.append('file', file);
+      const uploaded = await api('/api/documents/upload', { method: 'POST', body: formData });
+      const analysis = await api(`/api/documents/${uploaded.id}/analyze`, { method: 'POST' });
+      await finishAnalysis(analysis);
     } catch (err) {
-      console.error("Upload error:", err);
-      alert("Failed to process document.");
+      stopSteps();
       setIsProcessing(false);
+      notify(err.message || 'Could not process that document.', 'error');
     }
   };
 
   const handleAnalyzeExistingDoc = async (docId) => {
     setIsProcessing(true);
-    setProcessingStep(2);
+    runSteps([400, 1000, 1600]);
     try {
-      const analyzeRes = await fetch(`/api/documents/${docId}/analyze`, { method: 'POST' });
-      const analysisJson = await analyzeRes.json();
-      setProcessingStep(4);
-      setTimeout(async () => {
-        setIsProcessing(false);
-        setCurrentAnalysis(analysisJson);
-        await refreshAllData(analysisJson.id);
-        setCurrentTab('overview');
-      }, 700);
+      const analysis = await api(`/api/documents/${docId}/analyze`, { method: 'POST' });
+      await finishAnalysis(analysis);
     } catch (err) {
-      console.error("Analyze doc error:", err);
+      stopSteps();
       setIsProcessing(false);
+      notify(`Analysis failed. ${err.message}`, 'error');
     }
   };
 
   const handleUpdateFindingStatus = async (findingId, newStatus) => {
+    // Optimistic: the list reflects the change immediately, rolled back on failure.
+    const previous = findings;
+    setFindings((fs) => fs.map((f) => (f.id === findingId ? { ...f, status: newStatus } : f)));
     try {
-      await fetch(`/api/findings/${findingId}`, {
+      await api(`/api/findings/${findingId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus })
+        body: JSON.stringify({ status: newStatus }),
       });
-      await refreshAllData();
     } catch (err) {
-      console.error("Error updating finding status:", err);
+      setFindings(previous);
+      notify(`Status not saved. ${err.message}`, 'error');
     }
   };
 
-  const handleSubmitFeedback = async (feedbackPayload) => {
+  const handleSubmitFeedback = async (payload) => {
     try {
-      await fetch('/api/validation/feedback', {
+      await api('/api/validation/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(feedbackPayload)
+        body: JSON.stringify(payload),
       });
-      // Refresh validation metrics
-      const valRes = await fetch('/api/validation/feedback').then((r) => r.json());
-      setValidationData(valRes);
+      setValidationData(await api('/api/validation/feedback'));
+      notify('Feedback recorded.');
+      return true;
     } catch (err) {
-      console.error("Error submitting feedback:", err);
+      notify(`Feedback not saved. ${err.message}`, 'error');
+      return false;
     }
   };
 
+  const openCount = findings.filter((f) => f.status !== 'Resolved').length;
+
   return (
-    <div className="app-container">
-      <Sidebar 
-        currentTab={currentTab} 
-        setCurrentTab={setCurrentTab}
-        onResetDemo={handleResetDemo}
-        onRunDemo={handleRunDemo}
+    <div className="shell">
+      <a href="#main" className="skip-link no-print" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus(); }}>
+        Skip to content
+      </a>
+      <Sidebar
+        currentTab={currentTab}
+        onNavigate={navigate}
+        onReset={() => setConfirmReset(true)}
         currentAnalysis={currentAnalysis}
-        hasAnalysis={dashboardData && dashboardData.has_analysis}
+        openCount={openCount}
       />
 
-      <main className="main-content">
-        {currentTab === 'overview' && (
-          <OverviewView 
-            dashboardData={dashboardData} 
-            analysis={currentAnalysis}
-            onNavigate={setCurrentTab} 
-            onRunDemo={handleRunDemo} 
-          />
-        )}
-
-        {currentTab === 'analyze' && (
-          <AnalyzeView 
-            onRunDemo={handleRunDemo}
-            onUploadFile={handleUploadFile}
-            onAnalyzeDoc={handleAnalyzeExistingDoc}
-            documents={documents}
-            isProcessing={isProcessing}
-            processingStep={processingStep}
-            onNavigate={setCurrentTab}
-          />
-        )}
-
-        {currentTab === 'findings' && (
-          <FindingsView 
-            findings={findings}
-            onUpdateStatus={handleUpdateFindingStatus}
-          />
-        )}
-
-        {currentTab === 'reports' && (
-          <ReportsView 
-            analysis={currentAnalysis}
-            onNavigate={setCurrentTab}
-          />
-        )}
-
-        {currentTab === 'validation' && (
-          <ValidationView 
-            validationData={validationData}
-            onSubmitFeedback={handleSubmitFeedback}
-          />
-        )}
-
-        {currentTab === 'business_model' && (
-          <BusinessModelView 
-            businessModelData={businessModelData}
-          />
-        )}
-
-        {currentTab === 'roadmap' && (
-          <RoadmapView 
-            roadmapData={roadmapData}
-          />
-        )}
+      <main className="main" id="main" tabIndex={-1} style={{ outline: 'none' }}>
+        <div className="page">
+          {currentTab === 'overview' && (
+            <OverviewView
+              loaded={loaded}
+              dashboardData={dashboardData}
+              analysis={currentAnalysis}
+              findings={findings}
+              onNavigate={navigate}
+            />
+          )}
+          {currentTab === 'documents' && (
+            <AnalyzeView
+              onRunDemo={handleRunDemo}
+              onUploadFile={handleUploadFile}
+              onAnalyzeDoc={handleAnalyzeExistingDoc}
+              documents={documents}
+              isProcessing={isProcessing}
+              processingStep={processingStep}
+            />
+          )}
+          {currentTab === 'findings' && (
+            <FindingsView findings={findings} onUpdateStatus={handleUpdateFindingStatus} onNavigate={navigate} />
+          )}
+          {currentTab === 'report' && <ReportsView analysis={currentAnalysis} onNavigate={navigate} />}
+          {currentTab === 'validation' && (
+            <ValidationView validationData={validationData} onSubmitFeedback={handleSubmitFeedback} />
+          )}
+          {currentTab === 'model' && <BusinessModelView businessModelData={businessModelData} />}
+          {currentTab === 'roadmap' && <RoadmapView roadmapData={roadmapData} />}
+        </div>
       </main>
+
+      {confirmReset && (
+        <ConfirmDialog
+          title="Clear this workspace?"
+          body="All uploaded documents, analyses and finding statuses will be deleted. This can't be undone."
+          confirmLabel="Clear workspace"
+          onConfirm={handleResetDemo}
+          onCancel={() => setConfirmReset(false)}
+        />
+      )}
+      <Toasts toasts={toasts} />
     </div>
   );
 }

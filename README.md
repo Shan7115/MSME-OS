@@ -24,6 +24,38 @@ Indian MSME owners routinely produce detailed project profiles, bank loan applic
 
 ---
 
+## Screenshots
+
+**Overview.** The verdict first: a score, one sentence on why, and where it falls on the scale. Below it, the six areas that make up the score, the open findings that need attention, and what to do next.
+
+![Overview](docs/screenshots/01-overview.png)
+
+**Findings.** Every finding quotes the document and names the page it came from. Filter by severity, status or category, or search the quotes.
+
+![Findings](docs/screenshots/02-findings.png)
+
+**Finding detail.** The quote and page reference, why it matters, the recommended action, and a status you can update as you work through it.
+
+![Finding detail](docs/screenshots/03-finding-detail.png)
+
+**Documents.** Drop in a PDF, DOCX, XLSX, TXT or CSV, or try one of four sample dossiers.
+
+![Documents](docs/screenshots/04-documents.png)
+
+**Report.** A printable version of the review with the 30/60/90-day plan, for a credit committee or a client meeting.
+
+![Report](docs/screenshots/05-report.png)
+
+**Pilot feedback.** Record real feedback from pilot users. Only recorded responses are counted.
+
+![Pilot feedback](docs/screenshots/06-pilot-feedback.png)
+
+**Dark mode and small screens.** The interface follows the system light or dark setting and works down to phone width.
+
+<img src="docs/screenshots/07-overview-dark.png" alt="Overview in dark mode" width="640"> <img src="docs/screenshots/08-overview-mobile.png" alt="Overview on a phone" width="200">
+
+---
+
 ## 3. Quick Start
 
 ### Prerequisites
@@ -50,12 +82,12 @@ Indian MSME owners routinely produce detailed project profiles, bank loan applic
 ## 4. One-Click Demo Instructions
 
 1. Open [http://127.0.0.1:8000](http://127.0.0.1:8000).
-2. Click **"Try Demo Flow"** on the sidebar or header.
+2. Open **Documents** and click **Review sample** next to a sample dossier.
 3. The platform ingests the bundled 6-page project report for *Sri Murugan Agro Foods & Spices Pvt. Ltd.* (`sample-data/demo-document.pdf`).
 4. Inspect the 59/100 Readiness Score dial, 6 evidence-backed findings, and the 30/60/90-day plan.
-5. Filter findings in **Findings Explorer**, view citations, and update workflow status.
-6. Print the executive dossier from the **Executive Report** tab.
-7. Record real evaluation feedback in the **Validation Hub**.
+5. Filter findings in **Findings**, open one to see its citation, and update its status.
+6. Print the dossier from the **Report** tab.
+7. Record real evaluation feedback in **Pilot feedback**.
 
 ---
 
