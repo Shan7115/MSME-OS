@@ -64,18 +64,26 @@ Indian MSME owners routinely produce detailed project profiles, bank loan applic
 
 ### Running the Application
 
-1. **Activate Python Virtual Environment & Dependencies:**
-   ```powershell
-   .\venv\Scripts\python.exe -m pip install -r requirements.txt
-   ```
+**One command** (creates the virtual environment, installs dependencies, builds the frontend and opens the app):
 
-2. **Launch the Server:**
-   ```powershell
-   .\venv\Scripts\python.exe app.py
-   ```
+- Windows: double-click `start.bat`, or run it from a terminal.
+- Linux / macOS: `./start.sh`
 
-3. **Open the Application:**
-   Navigate to [http://127.0.0.1:8000](http://127.0.0.1:8000) in your browser.
+Then open [http://127.0.0.1:8000](http://127.0.0.1:8000). Set the `PORT` environment variable to use another port.
+
+<details>
+<summary>Manual steps</summary>
+
+```powershell
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+cd frontend && npm install && npm run build && cd ..
+python app.py
+```
+
+For frontend development, run `npm run dev` in `frontend/` (port 5173, proxies `/api` to port 8000).
+</details>
 
 ---
 
